@@ -1,0 +1,10 @@
+name: ChronoStore
+version: 1.0
+main: dev.soranzo.ChronoStore
+api-version: 26.1.2
+description: Controla o tempo online dos jogadores
+
+commands:
+  chrono:
+    description: Gerencia o plugin
+    usage: /chrono <check|reset>
