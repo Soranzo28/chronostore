@@ -202,6 +202,12 @@ public class Database {
         stmt.executeUpdate();
     }
 
+    public void closeOrphanedSessions() throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("UPDATE sessions SET date_out = strftime('%s','now') WHERE date_out IS NULL");
+        }
+    }
+
     public Map<String, Long> getAllTotalTimePlayed() throws SQLException {
         PreparedStatement stmt = connection.prepareStatement("""
             SELECT p.name, SUM(COALESCE(s.date_out, strftime('%s','now')) - s.date_in) AS total

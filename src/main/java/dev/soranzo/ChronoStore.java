@@ -28,6 +28,8 @@ public class ChronoStore extends JavaPlugin {
         try {
             db = Database.getInstance(getDataFolder());
 
+            db.closeOrphanedSessions();
+
             long lastReset = db.getLastReset();
             LocalDate lastResetDate = Instant.ofEpochSecond(lastReset)
                     .atZone(ZoneId.systemDefault())
