@@ -2,11 +2,12 @@ package dev.soranzo;
 
 import java.io.File;
 import java.sql.*;
+import java.util.UUID;
 
 public class Database {
 
     private static Database instance;
-    private Connection connection;
+    private final Connection connection;
 
     private Database(File dataFolder) throws SQLException {
         dataFolder.mkdirs();
@@ -64,5 +65,86 @@ public class Database {
                 VALUES (1, strftime('%s', 'now'));
             """);
         }
+    }
+
+    public void addPlayer(UUID uuid, String name) throws SQLException {
+        PreparedStatement stmt = connection.prepareStatement("INSERT INTO players (uuid, name, monitored) VALUES (?, ?, 0)");
+        stmt.setString(1, uuid.toString());
+        stmt.setString(2, name);
+        stmt.executeUpdate();
+    }
+
+    public void monitorPlayer(UUID uuid, boolean value) throws SQLException {
+        PreparedStatement stmt = connection.prepareStatement("UPDATE players SET monitored = ? WHERE uuid = ?");
+        stmt.setInt(1, value ? 1 : 0);
+        stmt.setString(2, uuid.toString());
+        stmt.executeUpdate();
+    }
+
+    public void setTbsp(UUID uuid, long time) throws SQLException {
+        PreparedStatement stmt = connection.prepareStatement("UPDATE players SET time_tbsp = ? WHERE uuid = ?");
+        stmt.setLong(1, time);
+        stmt.setString(2, uuid.toString());
+        stmt.executeUpdate();
+    }
+
+    public void beginSession(UUID uuid) throws SQLException {
+        PreparedStatement stmt = connection.prepareStatement("INSERT INTO sessions (player_uuid, date_in) VALUES (?, strftime('%s', 'now'))");
+        stmt.setString(1, uuid.toString());
+        stmt.executeUpdate();
+
+    }
+
+    public void endSession(UUID uuid) throws SQLException {
+        PreparedStatement stmt = connection.prepareStatement("UPDATE sessions SET date_out = strftime('%s', 'now') WHERE player_uuid = ? AND date_out IS NULL");
+        stmt.setString(1, uuid.toString());
+        stmt.executeUpdate();
+    }
+
+    public PlayerData getPlayerData(UUID uuid) throws SQLException {
+        PreparedStatement stmt = connection.prepareStatement("SELECT * FROM players WHERE uuid = ?");
+        stmt.setString(1, uuid.toString());
+
+        ResultSet rs = stmt.executeQuery();
+
+        if (rs.next()) {
+            return new PlayerData(
+                    UUID.fromString(rs.getString("uuid")),
+                    rs.getString("name"),
+                    rs.getInt("time_limit"),
+                    rs.getLong("time_tbsp"),
+                    rs.getInt("time_played_today"),
+                    rs.getInt("monitored") == 1
+            );
+        }
+
+        return null;
+    }
+
+    public void resetOneTimePlayed(UUID uuid) throws SQLException {
+        PreparedStatement stmt = connection.prepareStatement("UPDATE players SET time_played_today = 0 WHERE uuid = ?");
+        stmt.setString(1, uuid.toString());
+        stmt.executeUpdate();
+    }
+
+    public void resetAllTimePlayed() throws SQLException {
+        PreparedStatement stmt = connection.prepareStatement("UPDATE players SET time_played_today = 0");
+        stmt.executeUpdate();
+    }
+
+    public long getLastReset() throws SQLException {
+        PreparedStatement stmt = connection.prepareStatement("SELECT last_reset FROM config WHERE id = 1");
+        ResultSet rs = stmt.executeQuery();
+
+        if (rs.next()) {
+            return rs.getLong("last_reset");
+        }
+
+        return 0;
+    }
+
+    public void setLastReset() throws SQLException {
+        PreparedStatement stmt = connection.prepareStatement("UPDATE config SET last_reset = strftime('%s', 'now') WHERE id = 1");
+        stmt.executeUpdate();
     }
 }

@@ -6,5 +6,5 @@ description: Controla o tempo online dos jogadores
 
 commands:
   chrono:
-    description: Gerencia o plugin
-    usage: /chrono <check|reset>
+    description: Gerencia o tempo online
+    usage: /chrono <add|remove|tbsp>
