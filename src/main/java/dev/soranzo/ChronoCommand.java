@@ -115,7 +115,7 @@ public class ChronoCommand implements CommandExecutor {
 
 
                try {
-                   long tbsp = Long.parseLong(ap[2]);
+                   long tbsp = Long.parseLong(ap[2]) * 60;
                    db.setTbsp(target_uuid, tbsp);
                } catch (SQLException ex){
                    cs.sendMessage("§cErro ao setar tbsp.");

@@ -43,7 +43,7 @@ public class Database {
                 CREATE TABLE IF NOT EXISTS players (
                     uuid TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
-                    time_limit INTEGER DEFAULT 120, 
+                    time_limit INTEGER DEFAULT 7200, 
                     time_tbsp INTEGER DEFAULT 0,
                     time_played_today INTEGER DEFAULT 0,
                     monitored INTEGER DEFAULT 0
@@ -88,9 +88,10 @@ public class Database {
         stmt.executeUpdate();
     }
 
-    public void beginSession(UUID uuid) throws SQLException {
-        PreparedStatement stmt = connection.prepareStatement("INSERT INTO sessions (player_uuid, date_in) VALUES (?, strftime('%s', 'now'))");
+    public void beginSession(UUID uuid, long now) throws SQLException {
+        PreparedStatement stmt = connection.prepareStatement("INSERT INTO sessions (player_uuid, date_in) VALUES (?, ?)");
         stmt.setString(1, uuid.toString());
+        stmt.setLong(2, now);
         stmt.executeUpdate();
 
     }
@@ -119,6 +120,15 @@ public class Database {
         }
 
         return null;
+    }
+
+    public void addTimePlayed(UUID uuid, long seconds) throws SQLException {
+        PreparedStatement stmt = connection.prepareStatement(
+                "UPDATE players SET time_played_today = time_played_today + ? WHERE uuid = ?"
+        );
+        stmt.setLong(1, seconds);
+        stmt.setString(2, uuid.toString());
+        stmt.executeUpdate();
     }
 
     public void resetOneTimePlayed(UUID uuid) throws SQLException {
