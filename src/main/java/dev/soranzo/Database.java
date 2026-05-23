@@ -2,6 +2,8 @@ package dev.soranzo;
 
 import java.io.File;
 import java.sql.*;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 
 public class Database {
@@ -35,7 +37,9 @@ public class Database {
             stmt.execute("""
                 CREATE TABLE IF NOT EXISTS config (
                     id INTEGER PRIMARY KEY,
-                    last_reset INTEGER NOT NULL
+                    last_reset INTEGER NOT NULL,
+                    paused INTEGER DEFAULT 0,
+                    last_pause INTEGER
                 );
             """);
 
@@ -153,8 +157,66 @@ public class Database {
         return 0;
     }
 
+    public boolean isPaused() throws SQLException {
+        PreparedStatement stmt = connection.prepareStatement("SELECT paused FROM config WHERE id = 1");
+        ResultSet rs = stmt.executeQuery();
+        return rs.next() && rs.getInt("paused") == 1;
+    }
+
+    public void setPaused(boolean value) throws SQLException {
+        PreparedStatement stmt = connection.prepareStatement("UPDATE config SET paused = ? WHERE id = 1");
+        stmt.setInt(1, value ? 1 : 0);
+        stmt.executeUpdate();
+    }
+
+    public void setLastPause(long epoch_pause_moment) throws SQLException {
+        PreparedStatement stmt = connection.prepareStatement("UPDATE config SET last_pause = ? WHERE id = 1");
+        stmt.setLong(1, epoch_pause_moment);
+        stmt.executeUpdate();
+    }
+
+    public long getLastPause() throws  SQLException {
+        PreparedStatement stmt = connection.prepareStatement("SELECT last_pause FROM config WHERE id = 1");
+        ResultSet rs = stmt.executeQuery();
+        if (rs.next()) return rs.getLong("last_pause");
+        return 0;
+    }
+
+    public UUID findUUIDByName(String name) throws SQLException {
+        PreparedStatement stmt = connection.prepareStatement(
+            "SELECT uuid FROM players WHERE LOWER(name) = LOWER(?)");
+        stmt.setString(1, name);
+        ResultSet rs = stmt.executeQuery();
+        return rs.next() ? UUID.fromString(rs.getString("uuid")) : null;
+    }
+
+    public void setTimeLimit(UUID uuid, int seconds) throws SQLException {
+        PreparedStatement stmt = connection.prepareStatement("UPDATE players SET time_limit = ? WHERE uuid = ?");
+        stmt.setInt(1, seconds);
+        stmt.setString(2, uuid.toString());
+        stmt.executeUpdate();
+    }
+
     public void setLastReset() throws SQLException {
         PreparedStatement stmt = connection.prepareStatement("UPDATE config SET last_reset = strftime('%s', 'now') WHERE id = 1");
         stmt.executeUpdate();
+    }
+
+    public Map<String, Long> getAllTotalTimePlayed() throws SQLException {
+        PreparedStatement stmt = connection.prepareStatement("""
+            SELECT p.name, SUM(COALESCE(s.date_out, strftime('%s','now')) - s.date_in) AS total
+            FROM players p
+            INNER JOIN sessions s ON p.uuid = s.player_uuid
+            GROUP BY p.uuid, p.name
+            HAVING total > 0
+            ORDER BY total DESC
+            LIMIT 10
+        """);
+        ResultSet rs = stmt.executeQuery();
+        Map<String, Long> result = new LinkedHashMap<>();
+        while (rs.next()) {
+            result.put(rs.getString("name"), rs.getLong("total"));
+        }
+        return result;
     }
 }

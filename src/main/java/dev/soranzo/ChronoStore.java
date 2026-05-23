@@ -1,15 +1,16 @@
 package dev.soranzo;
 
+import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 import java.sql.SQLException;
+import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.util.Collection;
 import java.util.UUID;
 
 public class ChronoStore extends JavaPlugin {
@@ -17,6 +18,9 @@ public class ChronoStore extends JavaPlugin {
     private static ChronoStore instance;
     private static final SessionManager sm = new SessionManager();
     private static Database db;
+    private static boolean paused = false;
+    private static long lastPauseTime = 0;
+    private Leaderboard leaderboard;
 
     @Override
     public void onEnable() {
@@ -34,26 +38,58 @@ public class ChronoStore extends JavaPlugin {
                 db.setLastReset();
             }
 
-            getLogger().info("ChronoStore iniciado!");
+            paused = db.isPaused() || isWeekend();
+            if (paused != db.isPaused()) db.setPaused(paused);
+            if (paused) lastPauseTime = db.getLastPause();
+
+            leaderboard = new Leaderboard();
+            leaderboard.update();
+
+            getLogger().info("ChronoStore iniciado! Pausado: " + paused);
             getServer().getPluginManager().registerEvents(new PlayerListener(), this);
 
-            var cmd = getCommand("chrono");
-            if (cmd != null) cmd.setExecutor(new ChronoCommand());
+            getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event ->
+                ChronoCommand.register(event.registrar())
+            );
 
             Bukkit.getScheduler().runTaskTimer(this, () -> {
+                long now = Instant.now().getEpochSecond();
                 for (Player player : Bukkit.getOnlinePlayers()) {
-
                     UUID uuid = player.getUniqueId();
 
                     SessionData sd = sm.getSession(uuid);
-                    if (sd == null) continue;
+                    if (sd == null) {
+                        long tbspRemaining = sm.getTbspRemaining(uuid);
+                        if (tbspRemaining > 0) {
+                            leaderboard.updateTabListTbsp(player, tbspRemaining);
+                            Notifier.tickTbsp(player, tbspRemaining);
+                        } else {
+                            leaderboard.resetTabList(player);
+                        }
+                        continue;
+                    }
 
-                    long timePlayed = sd.timePlayedToday() + (Instant.now().getEpochSecond() - sd.startTime());
-                    if (timePlayed >= sd.timeLimit()) {
-                        player.kick(Component.text("Tempo esgotado! Volte em " + sm.formatTimeUntilReset()).color(NamedTextColor.RED));
+                    if (!paused) {
+                        long timePlayed = sd.timePlayedToday() + (now - sd.startTime());
+                        long remaining = sd.timeLimit() - timePlayed;
+                        if (remaining <= 0) {
+                            player.kick(Notifier.kickMessage(sm.formatTimeUntilReset()));
+                            continue;
+                        }
+                        if (remaining == 600 || remaining == 300 || remaining == 60) {
+                            Notifier.warnTimeLow(player, remaining);
+                        }
+                        leaderboard.updateTabList(player, remaining);
+                        Notifier.tickRemaining(player, remaining);
+                    } else {
+                        long frozenPlayed = sd.timePlayedToday() + Math.max(0, lastPauseTime - sd.startTime());
+                        long frozenRemaining = Math.max(0, sd.timeLimit() - frozenPlayed);
+                        leaderboard.updateTabList(player, frozenRemaining);
                     }
                 }
             }, 0L, 20L);
+
+            Bukkit.getScheduler().runTaskTimer(this, leaderboard::update, 20L * 60 * 5, 20L * 60 * 5);
 
             long seconds_until_reset = LocalDate.now().plusDays(1)
                     .atStartOfDay(ZoneId.systemDefault())
@@ -65,11 +101,12 @@ public class ChronoStore extends JavaPlugin {
                 try {
                     db.resetAllTimePlayed();
                     db.setLastReset();
+                    boolean weekend = isWeekend();
+                    if (paused != weekend) setPaused(weekend);
                 } catch (SQLException ex) {
                     ex.printStackTrace();
                 }
-            }, ticks_until_reset, 20L*60*60*24); //every 24h
-
+            }, ticks_until_reset, 20L * 60 * 60 * 24);
 
         } catch (SQLException e) {
             getLogger().severe("Erro ao inicializar banco: " + e.getMessage());
@@ -79,15 +116,59 @@ public class ChronoStore extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            SessionData sd = sm.getSession(player.getUniqueId());
+            if (sd == null) continue;
+            try {
+                long ref = paused
+                    ? Math.max(sd.startTime(), lastPauseTime)
+                    : Instant.now().getEpochSecond();
+                db.addTimePlayed(player.getUniqueId(), ref - sd.startTime());
+                db.endSession(player.getUniqueId());
+            } catch (SQLException e) {
+                getLogger().warning("Falha ao salvar sessão de " + player.getName() + ": " + e.getMessage());
+            }
+        }
         getLogger().info("ChronoStore desligado!");
     }
 
+    public static long getLastPauseTime() {
+        return lastPauseTime;
+    }
 
-    public static ChronoStore getInstance(){
+    public static void setPaused(boolean value) throws SQLException {
+        if (value) {
+            lastPauseTime = Instant.now().getEpochSecond();
+            db.setLastPause(lastPauseTime);
+        }
+        paused = value;
+        db.setPaused(value);
+        Component msg = value
+            ? Component.text("⏸ Monitoramento pausado. Bom jogo!").color(NamedTextColor.YELLOW)
+            : Component.text("▶ Monitoramento retomado.").color(NamedTextColor.GREEN);
+        for (Player p : Bukkit.getOnlinePlayers()) {
+            Notifier.actionBar(p, msg);
+        }
+    }
+
+    public static boolean isPaused() {
+        return paused;
+    }
+
+    private static boolean isWeekend() {
+        DayOfWeek day = LocalDate.now().getDayOfWeek();
+        return day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY;
+    }
+
+    public static ChronoStore getInstance() {
         return instance;
     }
 
     public SessionManager getSessionManager() {
         return sm;
+    }
+
+    public Leaderboard getLeaderboard() {
+        return leaderboard;
     }
 }

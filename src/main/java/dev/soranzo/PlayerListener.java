@@ -21,6 +21,8 @@ public class PlayerListener implements Listener {
         UUID uuid = e.getPlayer().getUniqueId();
         String name = e.getPlayer().getName();
         try {
+            ChronoStore.getInstance().getLeaderboard().assign(e.getPlayer());
+
             PlayerData pd = db.getPlayerData(uuid);
             if (pd == null) {
                 db.addPlayer(uuid, name);
@@ -29,14 +31,16 @@ public class PlayerListener implements Listener {
                 long now = Instant.now().getEpochSecond();
 
                 if (pd.timeTbsp() > 0) {
-                    long ticks = pd.timeTbsp() * 20 * 60;
+                    long ticks = pd.timeTbsp() * 20;
+                    sm.setTbspExpiry(uuid, now + pd.timeTbsp());
                     Bukkit.getScheduler().runTaskLater(ChronoStore.getInstance(), () -> {
-
                         if (Bukkit.getPlayer(uuid) == null) return;
                         try {
-                            db.beginSession(uuid, now);
-                            db.getPlayerData(uuid);
-                            sm.startSession(uuid, now, pd.timePlayedToday(), pd.timeLimit());
+                            long startTime = Instant.now().getEpochSecond();
+                            PlayerData fresh = db.getPlayerData(uuid);
+                            if (fresh == null || !fresh.monitored()) return;
+                            db.beginSession(uuid, startTime);
+                            sm.startSession(uuid, startTime, fresh.timePlayedToday(), fresh.timeLimit());
                         } catch (SQLException ex) {
                             ex.printStackTrace();
                         }
@@ -58,8 +62,14 @@ public class PlayerListener implements Listener {
         try {
             PlayerData pd = db.getPlayerData(uuid);
             if (pd != null && pd.monitored()) {
-                long time_played = sm.getSession(uuid).timePlayedToday();
-                db.addTimePlayed(uuid, time_played);
+                sm.removeTbspExpiry(uuid);
+                SessionData sd = sm.getSession(uuid);
+                if (sd == null) return;
+                long ref = ChronoStore.isPaused()
+                    ? Math.max(sd.startTime(), ChronoStore.getLastPauseTime())
+                    : Instant.now().getEpochSecond();
+                long elapsed = ref - sd.startTime();
+                db.addTimePlayed(uuid, elapsed);
                 sm.endSession(uuid);
                 db.endSession(uuid);
             }

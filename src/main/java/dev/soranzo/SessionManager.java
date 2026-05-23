@@ -10,15 +10,33 @@ import java.util.UUID;
 public class SessionManager {
 
     private final Map<UUID, SessionData> activeSessions = new HashMap<>();
-    private final Database db = Database.getInstance();
+    private final Map<UUID, Long> tbspExpiry = new HashMap<>();
 
     public void startSession(UUID uuid, long startTime, long playedTimeToday, int timeLimit) {
-        SessionData sd = new SessionData(startTime, playedTimeToday, timeLimit);
-        activeSessions.put(uuid, sd);
+        tbspExpiry.remove(uuid);
+        activeSessions.put(uuid, new SessionData(startTime, playedTimeToday, timeLimit));
     }
 
     public void endSession(UUID uuid) {
         activeSessions.remove(uuid);
+    }
+
+    public Map<UUID, SessionData> getActiveSessions() {
+        return activeSessions;
+    }
+
+    public void setTbspExpiry(UUID uuid, long expiryEpoch) {
+        tbspExpiry.put(uuid, expiryEpoch);
+    }
+
+    public long getTbspRemaining(UUID uuid) {
+        Long expiry = tbspExpiry.get(uuid);
+        if (expiry == null) return 0;
+        return Math.max(0, expiry - Instant.now().getEpochSecond());
+    }
+
+    public void removeTbspExpiry(UUID uuid) {
+        tbspExpiry.remove(uuid);
     }
 
     public SessionData getSession(UUID uuid) {
