@@ -26,27 +26,30 @@ public class PlayerListener implements Listener {
             PlayerData pd = db.getPlayerData(uuid);
             if (pd == null) {
                 db.addPlayer(uuid, name);
-            } else if (pd.monitored()) {
-
+            } else {
                 long now = Instant.now().getEpochSecond();
 
-                if (pd.timeTbsp() > 0) {
-                    long ticks = pd.timeTbsp() * 20;
-                    sm.setTbspExpiry(uuid, now + pd.timeTbsp());
-                    Bukkit.getScheduler().runTaskLater(ChronoStore.getInstance(), () -> {
-                        if (Bukkit.getPlayer(uuid) == null) return;
-                        try {
-                            long startTime = Instant.now().getEpochSecond();
-                            PlayerData fresh = db.getPlayerData(uuid);
-                            if (fresh == null || !fresh.monitored()) return;
-                            db.beginSession(uuid, startTime);
-                            sm.startSession(uuid, startTime, fresh.timePlayedToday(), fresh.timeLimit());
-                        } catch (SQLException ex) {
-                            ex.printStackTrace();
-                        }
-                    }, ticks);
+                if (pd.monitored()) {
+                    if (pd.timeTbsp() > 0) {
+                        long ticks = pd.timeTbsp() * 20;
+                        sm.setTbspExpiry(uuid, now + pd.timeTbsp());
+                        Bukkit.getScheduler().runTaskLater(ChronoStore.getInstance(), () -> {
+                            if (Bukkit.getPlayer(uuid) == null) return;
+                            try {
+                                long startTime = Instant.now().getEpochSecond();
+                                PlayerData fresh = db.getPlayerData(uuid);
+                                if (fresh == null || !fresh.monitored()) return;
+                                db.beginSession(uuid, startTime);
+                                sm.startSession(uuid, startTime, fresh.timePlayedToday(), fresh.timeLimit());
+                            } catch (SQLException ex) {
+                                ex.printStackTrace();
+                            }
+                        }, ticks);
+                    } else {
+                        db.beginSession(uuid, now);
+                        sm.startSession(uuid, now, pd.timePlayedToday(), pd.timeLimit());
+                    }
                 } else {
-                    sm.startSession(uuid, now, pd.timePlayedToday(), pd.timeLimit());
                     db.beginSession(uuid, now);
                 }
             }
@@ -61,18 +64,21 @@ public class PlayerListener implements Listener {
 
         try {
             PlayerData pd = db.getPlayerData(uuid);
-            if (pd != null && pd.monitored()) {
+            if (pd == null) return;
+
+            if (pd.monitored()) {
                 sm.removeTbspExpiry(uuid);
                 SessionData sd = sm.getSession(uuid);
-                if (sd == null) return;
-                long ref = ChronoStore.isPaused()
-                    ? Math.max(sd.startTime(), ChronoStore.getLastPauseTime())
-                    : Instant.now().getEpochSecond();
-                long elapsed = ref - sd.startTime();
-                db.addTimePlayed(uuid, elapsed);
-                sm.endSession(uuid);
-                db.endSession(uuid);
+                if (sd != null) {
+                    long ref = ChronoStore.isPaused()
+                        ? Math.max(sd.startTime(), ChronoStore.getLastPauseTime())
+                        : Instant.now().getEpochSecond();
+                    db.addTimePlayed(uuid, ref - sd.startTime());
+                    sm.endSession(uuid);
+                }
             }
+
+            db.endSession(uuid);
         } catch (SQLException ex) {
             ex.printStackTrace();
         }
