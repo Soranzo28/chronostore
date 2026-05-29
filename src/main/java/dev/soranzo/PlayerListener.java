@@ -26,6 +26,7 @@ public class PlayerListener implements Listener {
             PlayerData pd = db.getPlayerData(uuid);
             if (pd == null) {
                 db.addPlayer(uuid, name);
+                db.beginSession(uuid, Instant.now().getEpochSecond());
             } else {
                 long now = Instant.now().getEpochSecond();
 

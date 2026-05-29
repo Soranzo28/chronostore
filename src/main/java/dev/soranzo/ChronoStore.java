@@ -1,5 +1,6 @@
 package dev.soranzo;
 
+import dev.soranzo.chronointegration.*;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -11,9 +12,10 @@ import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.List;
 import java.util.UUID;
 
-public class ChronoStore extends JavaPlugin {
+public class ChronoStore extends JavaPlugin implements ChronoStoreAPI {
 
     private static ChronoStore instance;
     private static final SessionManager sm = new SessionManager();
@@ -21,6 +23,26 @@ public class ChronoStore extends JavaPlugin {
     private static boolean paused = false;
     private static long lastPauseTime = 0;
     private Leaderboard leaderboard;
+
+    @Override
+    public List<PlayerRecord> getPlayers() {
+        return db.getAllPlayers();
+    }
+
+    @Override
+    public List<SessionRecord> getSessions() {
+    return db.getAllSessions();
+    }
+
+    @Override
+    public List<PlayerRanking> getTopPlayers(int limit) {
+        return db.getTopPlayers(limit);
+    }
+
+    @Override
+    public ConfigRecord getChronoConfig() {
+        return db.getConfig();
+    }
 
     @Override
     public void onEnable() {
@@ -93,22 +115,7 @@ public class ChronoStore extends JavaPlugin {
 
             Bukkit.getScheduler().runTaskTimer(this, leaderboard::update, 20L * 60 * 5, 20L * 60 * 5);
 
-            long seconds_until_reset = LocalDate.now().plusDays(1)
-                    .atStartOfDay(ZoneId.systemDefault())
-                    .toEpochSecond() - Instant.now().getEpochSecond();
-
-            long ticks_until_reset = seconds_until_reset * 20;
-
-            Bukkit.getScheduler().runTaskTimer(this, () -> {
-                try {
-                    db.resetAllTimePlayed();
-                    db.setLastReset();
-                    boolean weekend = isWeekend();
-                    if (paused != weekend) setPaused(weekend);
-                } catch (SQLException ex) {
-                    ex.printStackTrace();
-                }
-            }, ticks_until_reset, 20L * 60 * 60 * 24);
+            scheduleNextReset();
 
         } catch (SQLException e) {
             getLogger().severe("Erro ao inicializar banco: " + e.getMessage());
@@ -155,6 +162,26 @@ public class ChronoStore extends JavaPlugin {
 
     public static boolean isPaused() {
         return paused;
+    }
+
+    private void scheduleNextReset() {
+        long now = Instant.now().getEpochSecond();
+        long nextMidnight = LocalDate.now().plusDays(1)
+                .atStartOfDay(ZoneId.systemDefault())
+                .toEpochSecond();
+        long ticksUntilReset = (nextMidnight - now) * 20L;
+
+        Bukkit.getScheduler().runTaskLater(this, () -> {
+            try {
+                db.resetAllTimePlayed();
+                db.setLastReset();
+                boolean weekend = isWeekend();
+                if (paused != weekend) setPaused(weekend);
+            } catch (SQLException ex) {
+                ex.printStackTrace();
+            }
+            scheduleNextReset();
+        }, ticksUntilReset);
     }
 
     private static boolean isWeekend() {

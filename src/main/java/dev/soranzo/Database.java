@@ -1,8 +1,16 @@
 package dev.soranzo;
 
+import dev.soranzo.chronointegration.PlayerRanking;
+import dev.soranzo.chronointegration.PlayerRecord;
+import dev.soranzo.chronointegration.ConfigRecord;
+import dev.soranzo.chronointegration.SessionRecord;
+import org.bukkit.entity.Player;
+
 import java.io.File;
 import java.sql.*;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -202,6 +210,39 @@ public class Database {
         stmt.executeUpdate();
     }
 
+    public List<String> dumpAllTables() throws SQLException {
+        List<String> lines = new ArrayList<>();
+        String[] tables = {"config", "players", "sessions"};
+        for (String table : tables) {
+            lines.add("§6=== " + table.toUpperCase() + " ===");
+            try (Statement stmt = connection.createStatement();
+                 ResultSet rs = stmt.executeQuery("SELECT * FROM " + table)) {
+                ResultSetMetaData meta = rs.getMetaData();
+                int cols = meta.getColumnCount();
+
+                StringBuilder header = new StringBuilder("§7");
+                for (int i = 1; i <= cols; i++) {
+                    if (i > 1) header.append(" | ");
+                    header.append(meta.getColumnName(i));
+                }
+                lines.add(header.toString());
+
+                boolean anyRow = false;
+                while (rs.next()) {
+                    anyRow = true;
+                    StringBuilder row = new StringBuilder("§f");
+                    for (int i = 1; i <= cols; i++) {
+                        if (i > 1) row.append(" | ");
+                        row.append(rs.getString(i));
+                    }
+                    lines.add(row.toString());
+                }
+                if (!anyRow) lines.add("§8(vazio)");
+            }
+        }
+        return lines;
+    }
+
     public void closeOrphanedSessions() throws SQLException {
         try (Statement stmt = connection.createStatement()) {
             stmt.execute("UPDATE sessions SET date_out = strftime('%s','now') WHERE date_out IS NULL");
@@ -224,5 +265,90 @@ public class Database {
             result.put(rs.getString("name"), rs.getLong("total"));
         }
         return result;
+    }
+
+    public List<PlayerRecord> getAllPlayers()  {
+        try {
+            PreparedStatement stmt = connection.prepareStatement("SELECT * FROM players");
+            ResultSet rs = stmt.executeQuery();
+            List<PlayerRecord> list = new ArrayList<>();
+            while (rs.next()) {
+                PlayerRecord p = new PlayerRecord(
+                        rs.getString("uuid"),
+                        rs.getString("name"),
+                        rs.getInt("time_limit"),
+                        rs.getInt("time_tbsp"),
+                        rs.getInt("time_played_today"),
+                        rs.getInt("monitored") == 1
+                );
+                list.add(p);
+            }
+            return list;
+        } catch (SQLException e) {
+            return new ArrayList<>();
+        }
+    }
+
+    public List<PlayerRanking> getTopPlayers(int limit) {
+        String sql = """
+        SELECT p.uuid, p.name,
+               SUM(COALESCE(s.date_out, strftime('%s', 'now')) - s.date_in) as total_time
+        FROM players p
+        JOIN sessions s ON s.player_uuid = p.uuid
+        GROUP BY p.uuid
+        ORDER BY total_time DESC
+        LIMIT ?
+        """;
+        try (PreparedStatement stmt = connection.prepareStatement(sql)) {
+            stmt.setInt(1, limit);
+            ResultSet rs = stmt.executeQuery();
+            List<PlayerRanking> list = new ArrayList<>();
+            while (rs.next()) {
+                list.add(new PlayerRanking(
+                        rs.getString("uuid"),
+                        rs.getString("name"),
+                        rs.getLong("total_time")
+                ));
+            }
+            return list;
+        } catch (SQLException e) {
+            return new ArrayList<>();
+        }
+    }
+
+    public ConfigRecord getConfig() {
+        try (PreparedStatement stmt = connection.prepareStatement("SELECT * FROM config WHERE id = 1");
+             ResultSet rs = stmt.executeQuery()) {
+            if (rs.next()) {
+                return new ConfigRecord(
+                        rs.getInt("id"),
+                        rs.getLong("last_reset"),
+                        rs.getInt("paused") == 1,
+                        rs.wasNull() ? null : rs.getLong("last_pause")
+                );
+            }
+            return null;
+        } catch (SQLException e) {
+            return null;
+        }
+    }
+
+    public List<SessionRecord> getAllSessions() {
+        try (PreparedStatement stmt = connection.prepareStatement("SELECT * FROM sessions");
+             ResultSet rs = stmt.executeQuery()) {
+            List<SessionRecord> list = new ArrayList<>();
+            while (rs.next()) {
+                long dateOut = rs.getLong("date_out");
+                list.add(new SessionRecord(
+                        rs.getInt("id"),
+                        rs.getString("player_uuid"),
+                        rs.getLong("date_in"),
+                        rs.wasNull() ? null : dateOut
+                ));
+            }
+            return list;
+        } catch (SQLException e) {
+            return new ArrayList<>();
+        }
     }
 }

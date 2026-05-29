@@ -17,6 +17,7 @@ import org.bukkit.entity.Player;
 
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -53,6 +54,7 @@ public class ChronoCommand {
                         .executes(ChronoCommand::executeReset)))
                 .then(Commands.literal("pause").executes(ChronoCommand::executePause))
                 .then(Commands.literal("resume").executes(ChronoCommand::executeResume))
+                .then(Commands.literal("db").executes(ChronoCommand::executeDb))
                 .build(),
             "Gerencia o tempo online"
         );
@@ -293,6 +295,19 @@ public class ChronoCommand {
 
         } catch (SQLException ex) {
             Notifier.error(source.getSender(), "Erro ao resetar tempo.");
+            ex.printStackTrace();
+        }
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private static int executeDb(CommandContext<CommandSourceStack> ctx) {
+        try {
+            List<String> lines = Database.getInstance().dumpAllTables();
+            for (String line : lines) {
+                ctx.getSource().getSender().sendMessage(Component.text(line));
+            }
+        } catch (SQLException ex) {
+            Notifier.error(ctx.getSource().getSender(), "Erro ao consultar banco.");
             ex.printStackTrace();
         }
         return Command.SINGLE_SUCCESS;
